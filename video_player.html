@@ -1,0 +1,38 @@
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=windows-1252">
+        <title>Streamer.bot BRB player</title>
+        <script>
+            function showVideo() {
+                // Retrieve everything after the "?" in the URL
+                const videoUrl = window.location.search.substring(1); // Removes the "?" and takes the rest of the URL
+
+                // Log for debugging
+                console.log("Retrieved video URL: " + videoUrl);
+
+                const videoElement = document.getElementById('videoplayer');
+                
+                // Check if the URL is valid
+                if (videoUrl) {
+                    videoElement.src = videoUrl;
+                    videoElement.play().catch(error => {
+                        console.error("Error playing video: ", error);
+                    });
+                } else {
+                    console.error("Video URL not found.");
+                }
+            }
+
+            function cleanup() {
+                document.getElementById('videocontainer').innerHTML = "";
+            }
+        </script>
+    </head>
+    <body onload="showVideo();">
+        <div id="videocontainer" style="position: absolute; left: 0px; top: 0px; width: 100%; z-index: 10; text-align: center">
+            <video id="videoplayer" style="width:100%" autoplay onended="cleanup();"></video>
+        </div>
+    </body>
+</html>
+
+// https://www.twitch.com/emptyprofile
