@@ -37,8 +37,6 @@ let browser;
 app.get('/get-mp4', async (req, res) => {
     const embedUrl = req.query.url;
 
-    logWithTimestamp(`Received request for /get-mp4 with URL: ${embedUrl}`);
-
     if (!embedUrl) {
         logWithTimestamp('Missing URL parameter');
         return res.status(400).send('Missing URL parameter');
@@ -47,7 +45,6 @@ app.get('/get-mp4', async (req, res) => {
     let found = false;
 
     try {
-        logWithTimestamp('Creating page');
         const page = await browser.newPage();
 
         // Block unnecessary resources
@@ -61,16 +58,12 @@ app.get('/get-mp4', async (req, res) => {
             }
         });
 
-        logWithTimestamp(`New page created for URL: ${embedUrl}`);
-
         // Intercept network requests to identify the .mp4 URL as early as possible
         const mp4Promise = new Promise((resolve, reject) => {
-            logWithTimestamp('Promise started');
             const onResponse = async (response) => {
                 const url = response.url();
                 if (url.includes('.mp4') && !found) {
                     found = true;
-                    logWithTimestamp(`.mp4 URL found: ${url}`);
                     page.off('response', onResponse); // Remove the event listener
                     resolve(url);
                 }
@@ -79,13 +72,11 @@ app.get('/get-mp4', async (req, res) => {
         });
 
         await page.goto(embedUrl, { waitUntil: 'domcontentloaded' });
-        logWithTimestamp(`Navigating to URL: ${embedUrl}`);
 
         const mp4Url = await mp4Promise;
 
         // Close the page after use
         await page.close();
-        logWithTimestamp('Page closed');
 
         if (found) {
             res.send(mp4Url);

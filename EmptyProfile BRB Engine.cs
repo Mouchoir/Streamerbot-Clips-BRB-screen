@@ -114,7 +114,6 @@ public class CPHInline
 
             // Use the embed URL and add "&parent=localhost" to avoid CORS and SOP restrictions
             string embedURL = $"{selectedClip.EmbedUrl}&parent=localhost";
-            CPH.LogWarn("Using Embed URL: " + embedURL);
 
             nextClipInfo = '"' + selectedClip.Title + '"' + " by " + selectedClip.CreatorName;
             nextClipDuration = selectedClip.Duration;  // Capture the duration of the next clip
@@ -123,7 +122,6 @@ public class CPHInline
             using (HttpClient client = new HttpClient())
             {
                 string requestUrl = $"{fullNodeServerUrl}/get-mp4?url={Uri.EscapeDataString(embedURL)}";
-                CPH.LogWarn("Requesting video URL from Node.js server: " + requestUrl);
 
                 try
                 {
@@ -136,9 +134,7 @@ public class CPHInline
                     {
                         // Use the raw URL & ensure no encoding
                         var fullVideoPlayerHtml = $"{workingDirectory}\\{videoPlayerHtml}";
-                        CPH.LogWarn("Video HTML player path : " + fullVideoPlayerHtml);
                         nextVideoUrl = $"file:///{fullVideoPlayerHtml}?{mp4Url}";
-                        CPH.LogWarn("Next clip Puppeteer URL: " + nextVideoUrl);
                     }
                     else
                     {

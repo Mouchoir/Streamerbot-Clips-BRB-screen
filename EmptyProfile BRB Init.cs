@@ -62,7 +62,7 @@ public class CPHInline
                 string output = process.StandardOutput.ReadToEnd();
                 string error = process.StandardError.ReadToEnd();
 
-                CPH.LogInfo("Node.js Server Output: " + output);
+                CPH.LogDebug("Node.js Server Output: " + output);
 
                 if (!string.IsNullOrEmpty(error))
                 {
@@ -73,7 +73,7 @@ public class CPHInline
                 // Optionally, you could wait for the process to exit, but typically you want the server to keep running
                 // process.WaitForExit();
 
-                CPH.LogInfo("Node.js server started successfully.");
+                CPH.LogDebug("Node.js server started successfully.");
             }
 
             return true;
