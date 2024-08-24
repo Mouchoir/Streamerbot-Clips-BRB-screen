@@ -22,6 +22,15 @@ public class CPHInline
         var nodeServerPort = CPH.GetGlobalVar<string>("NodeServerPort", true);
         var workingDirectory = CPH.GetGlobalVar<string>("WorkingDirectory", true);
 
+        // Validate the nodeServerPort, default to 3000 if not set or invalid
+        if (string.IsNullOrEmpty(nodeServerPort) || !int.TryParse(nodeServerPort, out int port) || port <= 0 || port > 65535)
+        {
+            CPH.LogWarn($"Invalid or missing NodeServerPort. Defaulting to port 3000.");
+            nodeServerPort = "3000";
+        }
+
+        string fullNodeServerUrl = $"http://{nodeServerUrl}:{nodeServerPort}";
+        CPH.LogWarn("Server URL: " + fullNodeServerUrl);
 
         // Get the target user from arguments
         string userName = args["targetUser"].ToString();
@@ -46,9 +55,6 @@ public class CPHInline
 
         Random rd = new Random();
 
-        string fullNodeServerUrl = $"http://{nodeServerUrl}:{nodeServerPort}";
-        CPH.LogWarn("Server URL " + fullNodeServerUrl);
-
         // Start fetching the first video URL asynchronously
         Task fetchNextVideoTask = FetchNextVideoUrlAsync(allClips, rd, videoPlayerHtml, fullNodeServerUrl, clipCreditsSource, scene, workingDirectory);
 
@@ -60,7 +66,7 @@ public class CPHInline
             CPH.Wait(100);
             delayLoop++;
         }
-       
+
         while (CPH.ObsGetCurrentScene() == scene)
         {
             // Wait for the next video URL to be ready
