@@ -2,9 +2,15 @@ const express = require('express');
 const puppeteer = require('puppeteer');
 
 const app = express();
-const port = 3000;
 
-let browser;
+// Use the PORT environment variable, or default to port 3000 if not set
+let port = process.env.PORT;
+
+// Validate the port number
+if (isNaN(port) || port <= 0 || port > 65535) {
+    logWithTimestamp(`Invalid or missing port number. Defaulting to port 3000.`);
+    port = 3000;
+}
 
 // Helper function to log with a timestamp
 function logWithTimestamp(message) {
@@ -13,6 +19,7 @@ function logWithTimestamp(message) {
 }
 
 // Launch Puppeteer when the server starts
+let browser;
 (async () => {
     try {
         browser = await puppeteer.launch({ headless: true });

@@ -12,23 +12,32 @@ public class CPHInline
         string nodeJsPath = CPH.GetGlobalVar<string>("NodeJsPath", true);
         string nodeServerPort = CPH.GetGlobalVar<string>("NodeServerPort", true);
 
+        // Validate the nodeServerPort, default to 3000 if not set or invalid
+        if (string.IsNullOrEmpty(nodeServerPort) || !int.TryParse(nodeServerPort, out int port) || port <= 0 || port > 65535)
+        {
+            CPH.LogWarn($"Invalid or missing NodeServerPort. Defaulting to port 3000.");
+            nodeServerPort = "3000";
+        }
+
         // Combine the working directory with the script file name
         string javascriptServerPath = Path.Combine(workingDirectory, javascriptServer);
 
         // Log the information
-        CPH.LogInfo($"Starting Node.js server on port {nodeServerPort} using script: {javascriptServerPath}");
+        CPH.LogInfo($"Starting Node.js server using script: {javascriptServerPath} on port {nodeServerPort}");
 
         // Configure the process start info
         ProcessStartInfo startInfo = new ProcessStartInfo
         {
             FileName = nodeJsPath,
-            Arguments = $"\"{javascriptServerPath}\" -port {nodeServerPort}",  // Quote the script path to handle spaces
+            Arguments = $"\"{javascriptServerPath}\"",  // Quote the script path to handle spaces
             WorkingDirectory = workingDirectory,  // Set the working directory
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true
         };
+
+        startInfo.EnvironmentVariables["PORT"] = nodeServerPort;  // Set the PORT environment variable
 
         try
         {
