@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Threading.Tasks;
 
 public class CPHInline
@@ -16,10 +17,11 @@ public class CPHInline
         var scene = CPH.GetGlobalVar<string>("BRBScene", true);
         var source = CPH.GetGlobalVar<string>("BRBBrowserSource", true);
         var clipCreditsSource = CPH.GetGlobalVar<string>("ClipCreditsSource", true);
+        var videoPlayerHtml = CPH.GetGlobalVar<string>("VideoPlayerHtml", true);
+        var nodeServerUrl = CPH.GetGlobalVar<string>("NodeServerUrl", true);
+        var nodeServerPort = CPH.GetGlobalVar<string>("NodeServerPort", true);
         var workingDirectory = CPH.GetGlobalVar<string>("WorkingDirectory", true);
-        var nodeJsPath = CPH.GetGlobalVar<string>("NodeJsPath", true);
-        var videoPlayerPath = CPH.GetGlobalVar<string>("VideoPlayerPath", true);
-        var scriptPath = CPH.GetGlobalVar<string>("ScriptPath", true);
+
 
         // Get the target user from arguments
         string userName = args["targetUser"].ToString();
@@ -42,20 +44,23 @@ public class CPHInline
             }
         }
 
+        Random rd = new Random();
+
+        string fullNodeServerUrl = $"http://{nodeServerUrl}:{nodeServerPort}";
+        CPH.LogWarn("Server URL " + fullNodeServerUrl);
+
+        // Start fetching the first video URL asynchronously
+        Task fetchNextVideoTask = FetchNextVideoUrlAsync(allClips, rd, videoPlayerHtml, fullNodeServerUrl, clipCreditsSource, scene, workingDirectory);
+
         // Set OBS scene to BRB scene
         CPH.ObsSetScene(scene);
         int delayLoop = 0;
         while ((delayLoop < 25) && (CPH.ObsGetCurrentScene() != scene))
         {
-            CPH.Wait(250);
+            CPH.Wait(100);
             delayLoop++;
         }
-
-        Random rd = new Random();
-
-        // Start fetching the first video URL asynchronously
-        Task fetchNextVideoTask = FetchNextVideoUrlAsync(allClips, rd, videoPlayerPath, scriptPath, workingDirectory, nodeJsPath, clipCreditsSource, scene);
-
+       
         while (CPH.ObsGetCurrentScene() == scene)
         {
             // Wait for the next video URL to be ready
@@ -72,9 +77,8 @@ public class CPHInline
             int delay = (int)(nextClipDuration * 1000) + 250;
 
             // Fetch the next video URL while the current video is playing
-            fetchNextVideoTask = FetchNextVideoUrlAsync(allClips, rd, videoPlayerPath, scriptPath, workingDirectory, nodeJsPath, clipCreditsSource, scene);
+            fetchNextVideoTask = FetchNextVideoUrlAsync(allClips, rd, videoPlayerHtml, fullNodeServerUrl, clipCreditsSource, scene, workingDirectory);
 
-            delay += 800;  // Extra delay for transition and buffer
             int delayLeft = delay;
             while (delayLeft > 1000)
             {
@@ -97,7 +101,7 @@ public class CPHInline
         return true;
     }
 
-    private async Task FetchNextVideoUrlAsync(List<Twitch.Common.Models.Api.ClipData> allClips, Random rd, string videoPlayerPath, string scriptPath, string workingDirectory, string nodeJsPath, string clipCreditsSource, string scene)
+    private async Task FetchNextVideoUrlAsync(List<Twitch.Common.Models.Api.ClipData> allClips, Random rd, string videoPlayerHtml, string fullNodeServerUrl, string clipCreditsSource, string scene, string workingDirectory)
     {
         if (availableIndices.Count > 0)
         {
@@ -114,50 +118,37 @@ public class CPHInline
             nextClipInfo = '"' + selectedClip.Title + '"' + " by " + selectedClip.CreatorName;
             nextClipDuration = selectedClip.Duration;  // Capture the duration of the next clip
 
-            // Start Puppeteer to fetch the video's source URL
-            ProcessStartInfo startInfo = new ProcessStartInfo
+            // Call the Node.js server to fetch the video's source URL
+            using (HttpClient client = new HttpClient())
             {
-                FileName = nodeJsPath,  // Node.js path
-                Arguments = $"{scriptPath} \"{embedURL}\"",
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                string requestUrl = $"{fullNodeServerUrl}/get-mp4?url={Uri.EscapeDataString(embedURL)}";
+                CPH.LogWarn("Requesting video URL from Node.js server: " + requestUrl);
 
-            using (Process process = new Process { StartInfo = startInfo })
-            {
-                process.Start();
-
-                string output = await process.StandardOutput.ReadToEndAsync();
-                string error = await process.StandardError.ReadToEndAsync();
-                process.WaitForExit();
-
-                if (!string.IsNullOrEmpty(error))
+                try
                 {
-                    CPH.LogError("Puppeteer Error: " + error);
-                    nextVideoUrl = null;
-                }
-                else
-                {
-                    CPH.LogWarn("Puppeteer Output: " + output);
+                    HttpResponseMessage response = await client.GetAsync(requestUrl);
+                    response.EnsureSuccessStatusCode();
 
-                    // Get the link from output
-                    string[] outputLines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
-                    string directVideoUrl = outputLines.Length > 0 ? outputLines[0] : null;
+                    string mp4Url = await response.Content.ReadAsStringAsync();
 
-                    if (!string.IsNullOrEmpty(directVideoUrl))
+                    if (!string.IsNullOrEmpty(mp4Url))
                     {
                         // Use the raw URL & ensure no encoding
-                        nextVideoUrl = $"file:///{videoPlayerPath}?{directVideoUrl}";
+                        var fullVideoPlayerHtml = $"{workingDirectory}\\{videoPlayerHtml}";
+                        CPH.LogWarn("Video HTML player path : " + fullVideoPlayerHtml);
+                        nextVideoUrl = $"file:///{fullVideoPlayerHtml}?{mp4Url}";
                         CPH.LogWarn("Next clip Puppeteer URL: " + nextVideoUrl);
                     }
                     else
                     {
-                        CPH.LogError("Failed to extract Direct Video URL.");
+                        CPH.LogError("Failed to retrieve the video URL.");
                         nextVideoUrl = null;
                     }
+                }
+                catch (Exception ex)
+                {
+                    CPH.LogError("Error calling Node.js server: " + ex.Message);
+                    nextVideoUrl = null;
                 }
             }
         }

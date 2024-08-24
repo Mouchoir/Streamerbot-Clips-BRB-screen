@@ -1,0 +1,66 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+
+public class CPHInline
+{
+    public bool Execute()
+    {
+        // Import the global variables
+        string javascriptServer = CPH.GetGlobalVar<string>("JavascriptServer", true);
+        string workingDirectory = CPH.GetGlobalVar<string>("WorkingDirectory", true);
+        string nodeJsPath = CPH.GetGlobalVar<string>("NodeJsPath", true);
+        string nodeServerPort = CPH.GetGlobalVar<string>("NodeServerPort", true);
+
+        // Combine the working directory with the script file name
+        string javascriptServerPath = Path.Combine(workingDirectory, javascriptServer);
+
+        // Log the information
+        CPH.LogInfo($"Starting Node.js server on port {nodeServerPort} using script: {javascriptServerPath}");
+
+        // Configure the process start info
+        ProcessStartInfo startInfo = new ProcessStartInfo
+        {
+            FileName = nodeJsPath,
+            Arguments = $"\"{javascriptServerPath}\" -port {nodeServerPort}",  // Quote the script path to handle spaces
+            WorkingDirectory = workingDirectory,  // Set the working directory
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        };
+
+        try
+        {
+            // Start the Node.js server process
+            using (Process process = new Process { StartInfo = startInfo })
+            {
+                process.Start();
+
+                // Read the output (optional, for debugging or logging)
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+
+                CPH.LogInfo("Node.js Server Output: " + output);
+
+                if (!string.IsNullOrEmpty(error))
+                {
+                    CPH.LogError("Node.js Server Error: " + error);
+                    return false;
+                }
+
+                // Optionally, you could wait for the process to exit, but typically you want the server to keep running
+                // process.WaitForExit();
+
+                CPH.LogInfo("Node.js server started successfully.");
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            CPH.LogError("Failed to start Node.js server: " + ex.Message);
+            return false;
+        }
+    }
+}
