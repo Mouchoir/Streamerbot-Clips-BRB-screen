@@ -12,6 +12,18 @@ public class CPHInline
         string nodeJsPath = CPH.GetGlobalVar<string>("NodeJsPath", true);
         string nodeServerPort = CPH.GetGlobalVar<string>("NodeServerPort", true);
 
+        // Loading all clips to improve loading time
+        string userName = args["targetUser"].ToString();
+        var allClips = CPH.GetClipsForUser(userName);
+
+        if (allClips.Count == 0)
+        {
+            CPH.SendMessage("You do not have clips to play!");
+            return false;
+        }
+
+        CPH.SetGlobalVar("BrbAllClips", allClips);
+
         // Validate the nodeServerPort, default to 3000 if not set or invalid
         if (string.IsNullOrEmpty(nodeServerPort) || !int.TryParse(nodeServerPort, out int port) || port <= 0 || port > 65535)
         {

@@ -22,7 +22,10 @@ function logWithTimestamp(message) {
 let browser;
 (async () => {
     try {
-        browser = await puppeteer.launch({ headless: true });
+        browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        });
         logWithTimestamp('Puppeteer launched successfully');
     } catch (error) {
         logWithTimestamp(`Error launching Puppeteer: ${error}`);
@@ -46,22 +49,36 @@ app.get('/get-mp4', async (req, res) => {
     try {
         logWithTimestamp('Creating page');
         const page = await browser.newPage();
+
+        // Block unnecessary resources
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            const resourceType = request.resourceType();
+            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+                request.abort(); // Abort loading images, stylesheets, fonts, and media
+            } else {
+                request.continue();
+            }
+        });
+
         logWithTimestamp(`New page created for URL: ${embedUrl}`);
 
-        // Promise to capture the .mp4 URL
-        const mp4Promise = new Promise((resolve) => {
+        // Intercept network requests to identify the .mp4 URL as early as possible
+        const mp4Promise = new Promise((resolve, reject) => {
             logWithTimestamp('Promise started');
-            page.on('response', async (response) => {
+            const onResponse = async (response) => {
                 const url = response.url();
                 if (url.includes('.mp4') && !found) {
                     found = true;
                     logWithTimestamp(`.mp4 URL found: ${url}`);
+                    page.off('response', onResponse); // Remove the event listener
                     resolve(url);
                 }
-            });
+            };
+            page.on('response', onResponse);
         });
 
-        await page.goto(embedUrl);
+        await page.goto(embedUrl, { waitUntil: 'domcontentloaded' });
         logWithTimestamp(`Navigating to URL: ${embedUrl}`);
 
         const mp4Url = await mp4Promise;
