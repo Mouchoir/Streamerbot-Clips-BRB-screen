@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Net.Http;
 using System.Threading.Tasks;
 
 public class CPHInline
@@ -12,15 +13,26 @@ public class CPHInline
 
     public bool Execute()
     {
-        // Fetch global variables set in Streamer.bot 
+        // Fetch global variables set in Streamer.bot
         var scene = CPH.GetGlobalVar<string>("BRBScene", true);
         var source = CPH.GetGlobalVar<string>("BRBBrowserSource", true);
         var clipCreditsSource = CPH.GetGlobalVar<string>("ClipCreditsSource", true);
+        var videoPlayerHtml = CPH.GetGlobalVar<string>("VideoPlayerHtml", true);
+        var nodeServerUrl = CPH.GetGlobalVar<string>("NodeServerUrl", true);
+        var nodeServerPort = CPH.GetGlobalVar<string>("NodeServerPort", true);
         var workingDirectory = CPH.GetGlobalVar<string>("WorkingDirectory", true);
-        var nodeJsPath = CPH.GetGlobalVar<string>("NodeJsPath", true);
-        var videoPlayerPath = CPH.GetGlobalVar<string>("VideoPlayerPath", true);
-        var scriptPath = CPH.GetGlobalVar<string>("ScriptPath", true);
 
+        // Validate the nodeServerPort, default to 3000 if not set or invalid
+        if (string.IsNullOrEmpty(nodeServerPort) || !int.TryParse(nodeServerPort, out int port) || port <= 0 || port > 65535)
+        {
+            CPH.LogWarn($"Invalid or missing NodeServerPort. Defaulting to port 3000.");
+            nodeServerPort = "3000";
+        }
+
+        string fullNodeServerUrl = $"http://{nodeServerUrl}:{nodeServerPort}";
+        CPH.LogWarn("Server URL: " + fullNodeServerUrl);
+
+        // Get the target user from arguments
         string userName = args["targetUser"].ToString();
         var allClips = CPH.GetClipsForUser(userName);
 
@@ -30,32 +42,35 @@ public class CPHInline
             return false;
         }
 
+        // Initialize available indices if empty
         if (availableIndices == null || availableIndices.Count <= 0)
         {
             availableIndices = new List<int>();
             for (int i = 0; i < allClips.Count; i++)
             {
                 availableIndices.Add(i);
-                CPH.LogWarn("allClips title :" + allClips[i].Title + " | " + i);
+                CPH.LogWarn("All Clips Title: " + allClips[i].Title + " | Index: " + i);
             }
-        }
-
-        CPH.ObsSetScene(scene);
-        int delayloop = 0;
-        while ((delayloop < 25) && (CPH.ObsGetCurrentScene() != scene))
-        {
-            CPH.Wait(250);
-            delayloop++;
         }
 
         Random rd = new Random();
 
-        // Start fetching the first video URL
-        Task fetchNextVideoTask = FetchNextVideoUrlAsync(allClips, rd, videoPlayerPath, scriptPath, workingDirectory, nodeJsPath, clipCreditsSource, scene);
+        // Start fetching the first video URL asynchronously
+        Task fetchNextVideoTask = FetchNextVideoUrlAsync(allClips, rd, videoPlayerHtml, fullNodeServerUrl, clipCreditsSource, scene, workingDirectory);
+
+        // Set OBS scene to BRB scene
+        CPH.ObsSetScene(scene);
+        int delayLoop = 0;
+        while ((delayLoop < 25) && (CPH.ObsGetCurrentScene() != scene))
+        {
+            CPH.Wait(100);
+            delayLoop++;
+        }
 
         while (CPH.ObsGetCurrentScene() == scene)
         {
-            fetchNextVideoTask.Wait();  // Ensure the next video URL is ready before continuing
+            // Wait for the next video URL to be ready
+            fetchNextVideoTask.Wait();
 
             if (!string.IsNullOrEmpty(nextVideoUrl))
             {
@@ -67,12 +82,11 @@ public class CPHInline
             // Set delay based on the clip's duration + 250ms for safety
             int delay = (int)(nextClipDuration * 1000) + 250;
 
-            // Start fetching the next video URL while the current video is playing
-            fetchNextVideoTask = FetchNextVideoUrlAsync(allClips, rd, videoPlayerPath, scriptPath, workingDirectory, nodeJsPath, clipCreditsSource, scene);
+            // Fetch the next video URL while the current video is playing
+            fetchNextVideoTask = FetchNextVideoUrlAsync(allClips, rd, videoPlayerHtml, fullNodeServerUrl, clipCreditsSource, scene, workingDirectory);
 
-            delay += 800;  // Extra delay for transition and buffer
-            int delayleft = delay;
-            while (delayleft > 1000)
+            int delayLeft = delay;
+            while (delayLeft > 1000)
             {
                 if (CPH.ObsGetCurrentScene() != scene)
                 {
@@ -82,10 +96,10 @@ public class CPHInline
                 }
 
                 CPH.Wait(1000);
-                delayleft -= 1000;
+                delayLeft -= 1000;
             }
 
-            CPH.Wait(delayleft);
+            CPH.Wait(delayLeft);
             CPH.ObsSetGdiText(scene, clipCreditsSource, "");
         }
 
@@ -93,10 +107,11 @@ public class CPHInline
         return true;
     }
 
-    private async Task FetchNextVideoUrlAsync(List<Twitch.Common.Models.Api.ClipData> allClips, Random rd, string videoPlayerPath, string scriptPath, string workingDirectory, string nodeJsPath, string clipCreditsSource, string scene)
+    private async Task FetchNextVideoUrlAsync(List<Twitch.Common.Models.Api.ClipData> allClips, Random rd, string videoPlayerHtml, string fullNodeServerUrl, string clipCreditsSource, string scene, string workingDirectory)
     {
         if (availableIndices.Count > 0)
         {
+            // Select a random clip from the available list
             int randIndex = rd.Next(0, availableIndices.Count);
             int clipIndex = availableIndices[randIndex];
             availableIndices.RemoveAt(randIndex);
@@ -109,51 +124,39 @@ public class CPHInline
             nextClipInfo = '"' + selectedClip.Title + '"' + " by " + selectedClip.CreatorName;
             nextClipDuration = selectedClip.Duration;  // Capture the duration of the next clip
 
-            // Start Puppeteer to fetch the video's source URL
-            ProcessStartInfo startInfo = new ProcessStartInfo
+            // Call the Node.js server to fetch the video's source URL
+            using (HttpClient client = new HttpClient())
             {
-                FileName = nodeJsPath,  // Node.js path
-                Arguments = $"{scriptPath} \"{embedURL}\"",
-                WorkingDirectory = workingDirectory,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
+                string requestUrl = $"{fullNodeServerUrl}/get-mp4?url={Uri.EscapeDataString(embedURL)}";
+                CPH.LogWarn("Requesting video URL from Node.js server: " + requestUrl);
 
-            Process process = new Process { StartInfo = startInfo };
-            process.Start();
-
-            string output = await process.StandardOutput.ReadToEndAsync();
-            string error = await process.StandardError.ReadToEndAsync();
-            process.WaitForExit();
-
-            if (!string.IsNullOrEmpty(error))
-            {
-                CPH.LogError("Puppeteer Error: " + error);
-                nextVideoUrl = null;
-            }
-            else
-            {
-                CPH.LogWarn("Puppeteer Output: " + output);
-
-                // Get the link from output
-                string[] outputLines = output.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
-                string directVideoUrl = outputLines.Length > 0 ? outputLines[0] : null;
-
-                if (!string.IsNullOrEmpty(directVideoUrl))
+                try
                 {
-                    // Use the raw URL & ensure no encoding
-                    nextVideoUrl = $"file:///{videoPlayerPath}?{directVideoUrl}";
-                    CPH.LogWarn("Next clip Puppetteer URL: " + nextVideoUrl);
+                    HttpResponseMessage response = await client.GetAsync(requestUrl);
+                    response.EnsureSuccessStatusCode();
+
+                    string mp4Url = await response.Content.ReadAsStringAsync();
+
+                    if (!string.IsNullOrEmpty(mp4Url))
+                    {
+                        // Use the raw URL & ensure no encoding
+                        var fullVideoPlayerHtml = $"{workingDirectory}\\{videoPlayerHtml}";
+                        CPH.LogWarn("Video HTML player path : " + fullVideoPlayerHtml);
+                        nextVideoUrl = $"file:///{fullVideoPlayerHtml}?{mp4Url}";
+                        CPH.LogWarn("Next clip Puppeteer URL: " + nextVideoUrl);
+                    }
+                    else
+                    {
+                        CPH.LogError("Failed to retrieve the video URL.");
+                        nextVideoUrl = null;
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    CPH.LogError("Failed to extract Direct Video URL.");
+                    CPH.LogError("Error calling Node.js server: " + ex.Message);
                     nextVideoUrl = null;
                 }
             }
         }
     }
 }
-// https://www.twitch.com/emptyprofile
