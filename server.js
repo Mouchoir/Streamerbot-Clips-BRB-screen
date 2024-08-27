@@ -18,20 +18,25 @@ function logWithTimestamp(message) {
     console.log(`[${timestamp}] ${message}`);
 }
 
-// Launch Puppeteer when the server starts
 let browser;
-(async () => {
+
+// Function to launch Puppeteer and then start the server
+async function startServer() {
     try {
         browser = await puppeteer.launch({
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
         });
         logWithTimestamp('Puppeteer launched successfully');
+
+        app.listen(port, () => {
+            logWithTimestamp(`Server is listening on http://localhost:${port}`);
+        });
     } catch (error) {
         logWithTimestamp(`Error launching Puppeteer: ${error}`);
         process.exit(1); // Exit the server if Puppeteer fails to launch
     }
-})();
+}
 
 // Main route to handle GET requests with the URL as a parameter
 app.get('/get-mp4', async (req, res) => {
@@ -50,36 +55,21 @@ app.get('/get-mp4', async (req, res) => {
         logWithTimestamp('Creating page');
         const page = await browser.newPage();
 
-        // Block unnecessary resources
-        await page.setRequestInterception(true);
-        page.on('request', (request) => {
-            const resourceType = request.resourceType();
-            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
-                request.abort(); // Abort loading images, stylesheets, fonts, and media
-            } else {
-                request.continue();
-            }
-        });
-
-        logWithTimestamp(`New page created for URL: ${embedUrl}`);
-
-        // Intercept network requests to identify the .mp4 URL as early as possible
+        // Intercept network requests to identify the .mp4 URL
         const mp4Promise = new Promise((resolve, reject) => {
             logWithTimestamp('Promise started');
-            const onResponse = async (response) => {
+            page.on('response', async (response) => {
                 const url = response.url();
                 if (url.includes('.mp4') && !found) {
                     found = true;
                     logWithTimestamp(`.mp4 URL found: ${url}`);
-                    page.off('response', onResponse); // Remove the event listener
                     resolve(url);
                 }
-            };
-            page.on('response', onResponse);
+            });
         });
 
-        await page.goto(embedUrl, { waitUntil: 'domcontentloaded' });
-        logWithTimestamp(`Navigating to URL: ${embedUrl}`);
+        await page.goto(embedUrl, { waitUntil: 'networkidle2' });
+        logWithTimestamp(`Navigated to URL: ${embedUrl}`);
 
         const mp4Url = await mp4Promise;
 
@@ -89,6 +79,7 @@ app.get('/get-mp4', async (req, res) => {
 
         if (found) {
             res.send(mp4Url);
+            logWithTimestamp(`Sent .mp4 URL to client: ${mp4Url}`);
         } else {
             logWithTimestamp('No .mp4 URL found.');
             res.status(404).send('No .mp4 URL found.');
@@ -115,7 +106,5 @@ app.get('/shutdown', async (req, res) => {
     process.exit(0);
 });
 
-// Start the server
-app.listen(port, () => {
-    logWithTimestamp(`Server is listening on http://localhost:${port}`);
-});
+// Start Puppeteer and the server
+startServer();
